@@ -1,0 +1,40 @@
+# ____Required FastAPI packages_____
+# FastAPI for building APIs with Python 3.10+
+fastapi==0.115.11
+# Uvicorn for ASGI server implementation
+uvicorn==0.34.0
+
+# ____Required Database packages_____
+# SQLAlchemy for ORM-based database interaction
+sqlalchemy==2.0.39
+# MySQL adapter for Python (used to interact with MySQL)
+pymysql==1.1.1
+# # Alembic for database migrations and version controls
+alembic==1.15.1
+
+# ____Required Cryptography packages_____
+# For secure encryption and decryption
+cryptography==44.0.2
+
+# ____Required Pydantic packages_____
+# For data validation, serialization and managing configuration via environment variables
+pydantic==2.10.6
+pydantic-settings==2.8.1
+pydantic[email]
+
+# ____Required Date/Time packages_____
+# For timezone handling
+# pytz==2025.1
+
+# ____Required HTTP packages_____
+# HTTP client for async API requests
+httpx==0.24.1
+
+# ____JWT packages_____
+# For JSON Web Token (JWT) authentication
+python-jose==3.4.0
+
+# ____Password Hashing packages_____
+# For password hashing
+bcrypt==4.0.1
+passlib==1.7.4
