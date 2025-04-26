@@ -7,13 +7,20 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, Tuple
 
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 
 from ..db import models
+from ..db.database import get_db
 from ..utils.logger import app_logger
 from ..utils.config import app_settings
+
+# Security scheme for token authentication
+security = HTTPBearer()
 
 
 class AuthService:
@@ -29,8 +36,17 @@ class AuthService:
             app_settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES
         )
         self.pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-        self.access_token_expire_minutes = 60  # 1 hour
-        self.session_expire_days = 7  # 7 days for session
+
+        # Token expiration settings
+        self.ACCESS_TOKEN_EXPIRE_MINUTES = 60  # 1 hour
+        self.ACCESS_TOKEN_EXPIRE_MINUTES_EXTENDED = 24 * 7 * 60  # 1 week
+        self.REFRESH_TOKEN_EXPIRE_DAYS = 7  # 1 week
+        self.REFRESH_TOKEN_EXPIRE_DAYS_EXTENDED = 30  # 1 month
+        self.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES = 30  # 30 minutes
+
+        # Legacy attribute for backward compatibility
+        self.access_token_expire_minutes = self.ACCESS_TOKEN_EXPIRE_MINUTES
+        self.session_expire_days = self.REFRESH_TOKEN_EXPIRE_DAYS
 
     def create_verification_token(self, email: str) -> str:
         """
@@ -46,6 +62,68 @@ class AuthService:
             minutes=self.verification_token_expire_minutes
         )
         to_encode = {"sub": email, "exp": expire, "type": "email_verification"}
+
+        encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
+        return encoded_jwt
+
+    def create_access_token(
+        self, data: Dict[str, Any], expires_minutes: Optional[int] = None
+    ) -> str:
+        """
+        Create an access token for API authentication.
+
+        Args:
+            data: Data to encode in the token (should include 'sub' key with user identifier)
+            expires_minutes: Token expiration time in minutes (defaults to ACCESS_TOKEN_EXPIRE_MINUTES)
+
+        Returns:
+            str: JWT access token
+        """
+        to_encode = data.copy()
+        expire = datetime.now(timezone.utc) + timedelta(
+            minutes=expires_minutes or self.ACCESS_TOKEN_EXPIRE_MINUTES
+        )
+        to_encode.update({"exp": expire, "type": "access_token"})
+
+        encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
+        return encoded_jwt
+
+    def create_refresh_token(
+        self, data: Dict[str, Any], expires_days: Optional[int] = None
+    ) -> str:
+        """
+        Create a refresh token for obtaining new access tokens.
+
+        Args:
+            data: Data to encode in the token (should include 'sub' key with user identifier)
+            expires_days: Token expiration time in days (defaults to REFRESH_TOKEN_EXPIRE_DAYS)
+
+        Returns:
+            str: JWT refresh token
+        """
+        to_encode = data.copy()
+        expire = datetime.now(timezone.utc) + timedelta(
+            days=expires_days or self.REFRESH_TOKEN_EXPIRE_DAYS
+        )
+        to_encode.update({"exp": expire, "type": "refresh_token"})
+
+        encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
+        return encoded_jwt
+
+    def create_password_reset_token(self, email: str) -> str:
+        """
+        Create a password reset token.
+
+        Args:
+            email: The email address of the user requesting password reset
+
+        Returns:
+            str: JWT token that can be used for password reset
+        """
+        expire = datetime.now(timezone.utc) + timedelta(
+            minutes=self.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES
+        )
+        to_encode = {"sub": email, "exp": expire, "type": "password_reset"}
 
         encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
         return encoded_jwt
@@ -273,3 +351,45 @@ class AuthService:
 
 # Create a singleton instance
 auth_service = AuthService()
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_db),
+) -> models.User:
+    """
+    Get the current authenticated user from the session token.
+
+    This function is designed to be used as a FastAPI dependency
+    to inject the current user into route handlers.
+
+    Args:
+        credentials: HTTP Authorization credentials containing the token
+        db: Database session
+
+    Returns:
+        models.User: The authenticated user
+
+    Raises:
+        HTTPException: If authentication fails
+    """
+    token = credentials.credentials
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Use the synchronous validate_session method but with async session
+    # This is temporary and should be updated to fully async implementation
+    user = auth_service.validate_session(db, token)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return user

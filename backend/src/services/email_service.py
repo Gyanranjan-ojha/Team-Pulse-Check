@@ -26,6 +26,8 @@ class EmailService:
         self.email_user = app_settings.AUTH_EMAIL_HOST_USER
         self.email_password = app_settings.AUTH_EMAIL_HOST_PASSWORD_VALUE
         self.use_tls = app_settings.AUTH_EMAIL_USE_TLS
+        self.sender = app_settings.AUTH_EMAIL_HOST_USER
+        self.frontend_url = app_settings.FRONTEND_URL
 
         if not self.email_user or not self.email_password:
             app_logger.warning(
@@ -49,7 +51,7 @@ class EmailService:
         """
         message = MIMEMultipart("alternative")
         message["Subject"] = subject
-        message["From"] = self.email_user
+        message["From"] = self.sender
         message["To"] = recipient
 
         # Attach plain text version
@@ -89,7 +91,7 @@ class EmailService:
                 if self.use_tls:
                     server.starttls()
                 server.login(self.email_user, self.email_password)
-                server.sendmail(self.email_user, recipient, message.as_string())
+                server.sendmail(self.sender, recipient, message.as_string())
 
             app_logger.info(f"Email sent successfully to {recipient}")
             return True
@@ -109,7 +111,7 @@ class EmailService:
             bool: True if email was sent successfully, False otherwise
         """
         verification_url = (
-            f"{app_settings.FRONTEND_URL}/verify-email?token={verification_token}"
+            f"{self.frontend_url}/verify-email?token={verification_token}"
         )
 
         subject = "Verify your email address"
@@ -141,6 +143,38 @@ class EmailService:
         """
 
         return self.send_email(email, subject, body, html_body)
+
+    def send_password_reset_email(self, recipient: str, token: str) -> bool:
+        """
+        Send a password reset link to a user.
+
+        Args:
+            recipient: Email address of the recipient
+            token: Password reset token
+
+        Returns:
+            bool: True if email was sent successfully, False otherwise
+        """
+        reset_url = f"{self.frontend_url}/reset-password?token={token}"
+
+        subject = "Reset Your Password - Team Pulse Check"
+
+        body_html = f"""
+        <html>
+            <body>
+                <h2>Password Reset Request</h2>
+                <p>We received a request to reset your password. Click the link below to create a new password:</p>
+                <p><a href="{reset_url}">Reset Password</a></p>
+                <p>Or copy and paste this URL into your browser:</p>
+                <p>{reset_url}</p>
+                <p>This link will expire in 30 minutes for security reasons.</p>
+                <p>If you did not request a password reset, please ignore this email or contact support if you have concerns.</p>
+                <p>Thanks,<br>The Team Pulse Check Team</p>
+            </body>
+        </html>
+        """
+
+        return self.send_email(recipient, subject, body_html)
 
 
 # Create a singleton instance
